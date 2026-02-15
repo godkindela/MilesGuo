@@ -11,6 +11,12 @@ export default {
     try {
       const url = new URL(req.url);
 
+      if (req.method === "GET" && url.pathname === "/") {
+        return new Response(renderHomePage(), {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      }
+
       if (req.method === "GET" && url.pathname === "/health") {
         return json({
           ok: true,
@@ -167,6 +173,198 @@ function json(body: JsonObj, status = 200): Response {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
+}
+
+function renderHomePage(): string {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GWINS Search</title>
+  <style>
+    :root {
+      --bg: #f5f1e8;
+      --card: #fffdf8;
+      --ink: #1e2a26;
+      --muted: #5f6d67;
+      --accent: #0d7a5f;
+      --border: #d7d2c7;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Space Grotesk", "Noto Sans SC", "PingFang SC", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 15% 20%, #e8f6ea 0 18%, transparent 19%),
+        radial-gradient(circle at 85% 0%, #ffe9ce 0 22%, transparent 23%),
+        var(--bg);
+      padding: 32px 16px;
+    }
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 12px 30px rgba(39, 50, 47, 0.08);
+      overflow: hidden;
+    }
+    .header {
+      padding: 28px 24px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(1.4rem, 2.2vw, 2rem);
+      letter-spacing: 0.02em;
+    }
+    .desc {
+      margin: 8px 0 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+    .search {
+      padding: 18px 24px;
+      position: sticky;
+      top: 0;
+      background: linear-gradient(180deg, rgba(255, 253, 248, 0.95), rgba(255, 253, 248, 0.85));
+      backdrop-filter: blur(4px);
+      border-bottom: 1px solid var(--border);
+      z-index: 2;
+    }
+    input {
+      width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 15px;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color .2s ease, box-shadow .2s ease;
+      background: #fffcf6;
+    }
+    input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(13, 122, 95, 0.15);
+    }
+    .meta {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 0.9rem;
+      min-height: 18px;
+    }
+    .results { padding: 8px 24px 24px; }
+    .item {
+      padding: 16px 0;
+      border-bottom: 1px dashed var(--border);
+      animation: fadeIn .2s ease;
+    }
+    .item:last-child { border-bottom: 0; }
+    .url {
+      color: var(--accent);
+      text-decoration: none;
+      word-break: break-all;
+      font-size: 0.9rem;
+    }
+    .title {
+      margin: 6px 0 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      line-height: 1.45;
+    }
+    .snippet {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.55;
+      font-size: 0.94rem;
+    }
+    .empty {
+      padding: 28px 0;
+      text-align: center;
+      color: var(--muted);
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="header">
+      <h1>GWINS 全文检索</h1>
+      <p class="desc">输入关键词实时检索索引内容，结果来自 D1 FTS / 索引库。</p>
+    </header>
+    <section class="search">
+      <input id="q" autocomplete="off" placeholder="输入人物、事件、关键词..." />
+      <div id="meta" class="meta"></div>
+    </section>
+    <section id="results" class="results">
+      <div class="empty">开始输入即可查看相关内容</div>
+    </section>
+  </main>
+  <script>
+    const input = document.getElementById("q");
+    const meta = document.getElementById("meta");
+    const results = document.getElementById("results");
+    let timer = null;
+    let controller = null;
+
+    function escapeHtml(text) {
+      return text
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    function renderItems(items) {
+      if (!items.length) {
+        results.innerHTML = '<div class="empty">没有找到相关内容</div>';
+        return;
+      }
+      results.innerHTML = items.map((it) => \`
+        <article class="item">
+          <a class="url" href="\${it.url}" target="_blank" rel="noreferrer">\${escapeHtml(it.url || "")}</a>
+          <h2 class="title">\${escapeHtml(it.title || "Untitled")}</h2>
+          <p class="snippet">\${escapeHtml((it.snippet || "").replaceAll("[", "").replaceAll("]", ""))}</p>
+        </article>
+      \`).join("");
+    }
+
+    async function searchNow(keyword) {
+      const q = keyword.trim();
+      if (!q) {
+        meta.textContent = "";
+        results.innerHTML = '<div class="empty">开始输入即可查看相关内容</div>';
+        return;
+      }
+
+      if (controller) controller.abort();
+      controller = new AbortController();
+      meta.textContent = "检索中...";
+
+      try {
+        const resp = await fetch(\`/search?q=\${encodeURIComponent(q)}&limit=20\`, { signal: controller.signal });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) throw new Error(data.error || "search failed");
+        meta.textContent = \`关键词: "\${q}"，命中 \${data.count} 条\`;
+        renderItems(data.hits || []);
+      } catch (err) {
+        if (err.name === "AbortError") return;
+        meta.textContent = "检索失败";
+        results.innerHTML = '<div class="empty">请求失败，请稍后重试</div>';
+      }
+    }
+
+    input.addEventListener("input", () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => searchNow(input.value), 260);
+    });
+  </script>
+</body>
+</html>`;
 }
 
 function asString(value: unknown): string | undefined {
