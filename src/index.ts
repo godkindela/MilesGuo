@@ -676,6 +676,8 @@ function markdownToHtml(md: string): string {
 function inlineMd(text: string): string {
   let s = escapeHtml(text);
   s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, href) => `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${label}</a>`);
+  s = s.replace(/&lt;(https?:\/\/[^&\s]+)&gt;/gi, (_m, href) => `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(href)}</a>`);
+  s = s.replace(/(^|[\s：:])((https?:\/\/(?:odysee\.com|rumble\.com)\/[^\s<]+))/gi, (_m, prefix, href) => `${prefix}<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${escapeHtml(href)}</a>`);
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
   s = s.replace(/\*([^*]+)\*/g, "<em>$1</em>");
   s = s.replace(/`([^`]+)`/g, "<code>$1</code>");

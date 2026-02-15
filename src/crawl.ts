@@ -27,6 +27,7 @@ export interface Env {
 }
 
 const PUBLIC_DOMAIN = "https://miles.2z2z.org";
+const VIDEO_HOSTS = ["odysee.com", "rumble.com"];
 
 export interface SeedResult {
   discovered: number;
@@ -183,7 +184,8 @@ async function processOne(row: Candidate, env: Env): Promise<"ok" | "not_modifie
 
   const md = cleanMarkdown(data);
   const mdWithSubtitles = await mirrorSrtAssets(md, env);
-  const contentHash = await sha256(mdWithSubtitles);
+  const mdNormalized = normalizeVideoLinks(mdWithSubtitles);
+  const contentHash = await sha256(mdNormalized);
 
   if (row.content_sha256 && row.content_sha256 === contentHash) {
     await upsertStoredPage(env.DB, {
@@ -201,11 +203,11 @@ async function processOne(row: Candidate, env: Env): Promise<"ok" | "not_modifie
 
   const key = buildR2Key(row.url);
 
-  await env.BUCKET.put(key, mdWithSubtitles, {
+  await env.BUCKET.put(key, mdNormalized, {
     httpMetadata: { contentType: "text/markdown; charset=utf-8" },
   });
 
-  const chunks = splitMarkdownIntoChunks(mdWithSubtitles, 2000);
+  const chunks = splitMarkdownIntoChunks(mdNormalized, 2000);
   await replaceChunks(env.DB, {
     url: row.url,
     urlHash: row.url_hash,
@@ -290,6 +292,32 @@ function normalizeSrtPath(input: string): string | null {
   } catch {
     return null;
   }
+}
+
+function normalizeVideoLinks(markdown: string): string {
+  let output = markdown;
+
+  const autoLinkRe = new RegExp(
+    `<(https?:\\/\\/(?:${VIDEO_HOSTS.map(escapeRe).join("|")})\\/[^>\\s]+)>`,
+    "gi"
+  );
+  output = output.replace(autoLinkRe, (_m, url: string) => `[${url}](${url})`);
+
+  const plainRe = new RegExp(
+    `(^|[\\s：:])((https?:\\/\\/(?:${VIDEO_HOSTS.map(escapeRe).join("|")})\\/[^\\s)\\]]+))`,
+    "gim"
+  );
+  output = output.replace(plainRe, (m: string, prefix: string, url: string, offset: number) => {
+    const before = output.slice(Math.max(0, offset - 2), offset);
+    if (before.endsWith("](")) return m;
+    return `${prefix}[${url}](${url})`;
+  });
+
+  return output;
+}
+
+function escapeRe(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 async function runPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {
