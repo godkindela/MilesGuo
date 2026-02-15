@@ -260,9 +260,24 @@ export async function replaceChunks(
 export async function searchChunks(
   db: D1Database,
   q: string,
-  limit: number
-): Promise<Array<{ url: string; url_hash: string; title: string; snippet: string }>> {
+  pageSize: number,
+  page: number
+): Promise<{
+  hits: Array<{ url: string; url_hash: string; title: string; snippet: string }>;
+  total: number;
+}> {
+  const offset = Math.max(0, (page - 1) * pageSize);
+
   try {
+    const totalRow = await db
+      .prepare(
+        `SELECT COUNT(*) AS total
+         FROM chunks_fts
+         WHERE chunks_fts MATCH ?`
+      )
+      .bind(q)
+      .first<{ total: number }>();
+
     const rs = await db
       .prepare(
         `SELECT url,
@@ -271,13 +286,27 @@ export async function searchChunks(
                 snippet(chunks_fts, 3, '[', ']', ' ... ', 24) AS snippet
          FROM chunks_fts
          WHERE chunks_fts MATCH ?
-         LIMIT ?`
+         LIMIT ?
+         OFFSET ?`
       )
-      .bind(q, limit)
+      .bind(q, pageSize, offset)
       .all<{ url: string; url_hash: string; title: string; snippet: string }>();
-    return rs.results ?? [];
+
+    return {
+      hits: rs.results ?? [],
+      total: Number(totalRow?.total ?? 0),
+    };
   } catch {
     const like = `%${q}%`;
+    const totalRow = await db
+      .prepare(
+        `SELECT COUNT(*) AS total
+         FROM chunks c
+         WHERE c.content LIKE ?`
+      )
+      .bind(like)
+      .first<{ total: number }>();
+
     const rs = await db
       .prepare(
         `SELECT p.url,
@@ -287,10 +316,14 @@ export async function searchChunks(
          FROM chunks c
          JOIN pages p ON p.url_hash = c.url_hash
          WHERE c.content LIKE ?
-         LIMIT ?`
+         LIMIT ?
+         OFFSET ?`
       )
-      .bind(like, limit)
+      .bind(like, pageSize, offset)
       .all<{ url: string; url_hash: string; title: string; snippet: string }>();
-    return rs.results ?? [];
+    return {
+      hits: rs.results ?? [],
+      total: Number(totalRow?.total ?? 0),
+    };
   }
 }

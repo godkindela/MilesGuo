@@ -11,7 +11,7 @@
 - `POST /crawl/seed`：从栏目页发现文章链接并入库去重。
 - `POST /crawl/run`：批量抓取文章、转换 Markdown、写入 R2、写入 D1 chunks/FTS。
 - `GET /page?url=...`：按 URL 返回对应 Markdown。
-- `GET /search?q=...&limit=20`：基于 FTS 搜索。
+- `GET /search?q=...&page=1&page_size=10`：基于 FTS 搜索（支持分页）。
 - `GET /health`：健康检查与绑定状态。
 - `GET /robots.txt`：搜索引擎抓取策略。
 - `GET /sitemap.xml`：结果页 sitemap。
@@ -116,7 +116,7 @@ curl "https://miles.2z2z.org/page?url=https://gwins.org/cn/milesguo/23874.html"
 ### 搜索
 
 ```bash
-curl "https://miles.2z2z.org/search?q=%E9%83%AD%E6%96%87%E8%B4%B5&limit=20"
+curl "https://miles.2z2z.org/search?q=%E9%83%AD%E6%96%87%E8%B4%B5&page=1&page_size=10"
 ```
 
 ### Upsert 热点

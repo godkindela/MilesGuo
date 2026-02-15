@@ -173,15 +173,25 @@ export default {
 
       if (req.method === "GET" && url.pathname === "/search") {
         const q = (url.searchParams.get("q") ?? "").trim();
-        const limit = clampInt(url.searchParams.get("limit"), 1, 50, 20);
+        const pageSize = clampInt(url.searchParams.get("page_size"), 1, 50, 10);
+        const page = clampInt(url.searchParams.get("page"), 1, 100000, 1);
         if (!q) return json({ ok: false, error: "missing q parameter" }, 400);
 
-        const hits = await searchChunks(env.DB, q, limit);
-        const normalized = hits.map((h) => ({
+        const result = await searchChunks(env.DB, q, pageSize, page);
+        const normalized = result.hits.map((h) => ({
           ...h,
           result_path: `${PRIMARY_ORIGIN}/results/${h.url_hash}`,
         }));
-        return json({ ok: true, q, limit, count: normalized.length, hits: normalized });
+        return json({
+          ok: true,
+          q,
+          page,
+          page_size: pageSize,
+          total: result.total,
+          count: normalized.length,
+          has_more: page * pageSize < result.total,
+          hits: normalized,
+        });
       }
 
       if (req.method === "POST" && url.pathname === "/hotspots/upsert") {
@@ -377,6 +387,29 @@ function renderHomePage(): string {
       min-height: 18px;
     }
     .results { padding: 8px 24px 24px; }
+    .pager {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: flex-end;
+      margin-top: 14px;
+    }
+    .pager button {
+      border: 1px solid var(--border);
+      background: #fff;
+      padding: 8px 12px;
+      border-radius: 8px;
+      cursor: pointer;
+      color: var(--ink);
+    }
+    .pager button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+    .pager span {
+      color: var(--muted);
+      font-size: 0.92rem;
+    }
     .item {
       padding: 16px 0;
       border-bottom: 1px dashed var(--border);
@@ -424,6 +457,11 @@ function renderHomePage(): string {
     </section>
     <section id="results" class="results">
       <div class="empty">开始输入即可查看相关内容</div>
+      <div id="pager" class="pager" style="display:none;">
+        <button id="prevBtn">上一页</button>
+        <span id="pageInfo"></span>
+        <button id="nextBtn">下一页</button>
+      </div>
     </section>
   </main>
   <script type="application/ld+json">
@@ -443,8 +481,15 @@ function renderHomePage(): string {
     const input = document.getElementById("q");
     const meta = document.getElementById("meta");
     const results = document.getElementById("results");
+    const pager = document.getElementById("pager");
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const pageInfo = document.getElementById("pageInfo");
     let timer = null;
     let controller = null;
+    let currentPage = 1;
+    let currentQuery = "";
+    const pageSize = 10;
 
     function escapeHtml(text) {
       return text
@@ -456,6 +501,7 @@ function renderHomePage(): string {
     function renderItems(items) {
       if (!items.length) {
         results.innerHTML = '<div class="empty">没有找到相关内容</div>';
+        pager.style.display = "none";
         return;
       }
       results.innerHTML = items.map((it) => \`
@@ -466,13 +512,23 @@ function renderHomePage(): string {
           <p class="snippet">\${escapeHtml((it.snippet || "").replaceAll("[", "").replaceAll("]", ""))}</p>
         </article>
       \`).join("");
+      results.appendChild(pager);
     }
 
-    async function searchNow(keyword) {
+    function updatePager(total, page) {
+      const totalPages = Math.max(1, Math.ceil(total / pageSize));
+      pager.style.display = total > 0 ? "flex" : "none";
+      pageInfo.textContent = \`第 \${page} / \${totalPages} 页\`;
+      prevBtn.disabled = page <= 1;
+      nextBtn.disabled = page >= totalPages;
+    }
+
+    async function searchNow(keyword, page = 1) {
       const q = keyword.trim();
       if (!q) {
         meta.textContent = "";
         results.innerHTML = '<div class="empty">开始输入即可查看相关内容</div>';
+        pager.style.display = "none";
         return;
       }
 
@@ -481,21 +537,33 @@ function renderHomePage(): string {
       meta.textContent = "检索中...";
 
       try {
-        const resp = await fetch(\`/search?q=\${encodeURIComponent(q)}&limit=20\`, { signal: controller.signal });
+        const resp = await fetch(\`/search?q=\${encodeURIComponent(q)}&page=\${page}&page_size=\${pageSize}\`, { signal: controller.signal });
         const data = await resp.json();
         if (!resp.ok || !data.ok) throw new Error(data.error || "search failed");
-        meta.textContent = \`关键词: "\${q}"，命中 \${data.count} 条\`;
+        currentQuery = q;
+        currentPage = data.page || page;
+        meta.textContent = \`关键词: "\${q}"，命中 \${data.total} 条\`;
         renderItems(data.hits || []);
+        updatePager(data.total || 0, currentPage);
       } catch (err) {
         if (err.name === "AbortError") return;
         meta.textContent = "检索失败";
         results.innerHTML = '<div class="empty">请求失败，请稍后重试</div>';
+        pager.style.display = "none";
       }
     }
 
     input.addEventListener("input", () => {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => searchNow(input.value), 260);
+      timer = setTimeout(() => searchNow(input.value, 1), 260);
+    });
+
+    prevBtn.addEventListener("click", () => {
+      if (currentPage > 1) searchNow(currentQuery, currentPage - 1);
+    });
+
+    nextBtn.addEventListener("click", () => {
+      searchNow(currentQuery, currentPage + 1);
     });
   </script>
 </body>
@@ -565,7 +633,7 @@ function renderHomeMarkdownForAi(
     "",
     `- site: ${PRIMARY_ORIGIN}`,
     "- format: markdown",
-    "- usage: call `/search?q=关键词&limit=20` for retrieval",
+    "- usage: call `/search?q=关键词&page=1&page_size=10` for retrieval",
     "",
     "## Recent Results",
     "",
