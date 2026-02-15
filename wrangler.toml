@@ -1,0 +1,18 @@
+name = "gwins-md"
+main = "src/index.ts"
+compatibility_date = "2026-02-15"
+
+[ai]
+binding = "AI"
+
+[[r2_buckets]]
+binding = "BUCKET"
+bucket_name = "gwins-md"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gwins-md"
+database_id = "0bf8c2cf-7ece-4533-8447-086732bbfd74"
+
+[triggers]
+crons = ["0 * * * *"]
