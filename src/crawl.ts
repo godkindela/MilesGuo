@@ -26,6 +26,8 @@ export interface Env {
   DB: D1Database;
 }
 
+const PUBLIC_DOMAIN = "https://miles.2z2z.org";
+
 export interface SeedResult {
   discovered: number;
   inserted: number;
@@ -180,7 +182,8 @@ async function processOne(row: Candidate, env: Env): Promise<"ok" | "not_modifie
   }
 
   const md = cleanMarkdown(data);
-  const contentHash = await sha256(md);
+  const mdWithSubtitles = await mirrorSrtAssets(md, env);
+  const contentHash = await sha256(mdWithSubtitles);
 
   if (row.content_sha256 && row.content_sha256 === contentHash) {
     await upsertStoredPage(env.DB, {
@@ -198,11 +201,11 @@ async function processOne(row: Candidate, env: Env): Promise<"ok" | "not_modifie
 
   const key = buildR2Key(row.url);
 
-  await env.BUCKET.put(key, md, {
+  await env.BUCKET.put(key, mdWithSubtitles, {
     httpMetadata: { contentType: "text/markdown; charset=utf-8" },
   });
 
-  const chunks = splitMarkdownIntoChunks(md, 2000);
+  const chunks = splitMarkdownIntoChunks(mdWithSubtitles, 2000);
   await replaceChunks(env.DB, {
     url: row.url,
     urlHash: row.url_hash,
@@ -223,6 +226,70 @@ async function processOne(row: Candidate, env: Env): Promise<"ok" | "not_modifie
   });
 
   return "ok";
+}
+
+async function mirrorSrtAssets(markdown: string, env: Env): Promise<string> {
+  const links = extractSrtLinks(markdown);
+  let output = markdown;
+  for (const link of links) {
+    const normalizedPath = normalizeSrtPath(link);
+    if (!normalizedPath) continue;
+
+    const sourceUrl = `https://gwins.org${normalizedPath}`;
+    const targetKey = normalizedPath.replace(/^\/+/, "");
+    const targetUrl = `${PUBLIC_DOMAIN}${normalizedPath}`;
+
+    try {
+      const resp = await fetch(sourceUrl, {
+        headers: { "User-Agent": "Mozilla/5.0 (compatible; MarkdownBot/1.0)" },
+      });
+      if (!resp.ok) continue;
+      const body = await resp.arrayBuffer();
+      await env.BUCKET.put(targetKey, body, {
+        httpMetadata: {
+          contentType: "application/x-subrip; charset=utf-8",
+        },
+      });
+
+      output = output.replaceAll(link, targetUrl);
+    } catch {
+      // keep original subtitle link if mirroring fails
+    }
+  }
+
+  output = output
+    .replace(/\(\/uploads\/srt\/([^)]+\.srt)\)/gi, `(${PUBLIC_DOMAIN}/uploads/srt/$1)`)
+    .replace(/\(https?:\/\/gwins\.org\/uploads\/srt\/([^)]+\.srt)\)/gi, `(${PUBLIC_DOMAIN}/uploads/srt/$1)`);
+
+  return output;
+}
+
+function extractSrtLinks(markdown: string): string[] {
+  const set = new Set<string>();
+  const mdLinkRe = /\(([^)\s]+\.srt)\)/gi;
+  for (const m of markdown.matchAll(mdLinkRe)) {
+    const link = m[1];
+    if (link) set.add(link.trim());
+  }
+  return [...set];
+}
+
+function normalizeSrtPath(input: string): string | null {
+  if (!input || input.endsWith("/.srt")) return null;
+
+  try {
+    if (input.startsWith("http://") || input.startsWith("https://")) {
+      const u = new URL(input);
+      if (u.hostname !== "gwins.org") return null;
+      if (!u.pathname.startsWith("/uploads/srt/")) return null;
+      return u.pathname;
+    }
+
+    if (input.startsWith("/uploads/srt/")) return input;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 async function runPool<T>(items: T[], concurrency: number, fn: (item: T) => Promise<void>): Promise<void> {

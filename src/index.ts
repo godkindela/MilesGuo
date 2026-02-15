@@ -34,6 +34,39 @@ export default {
         });
       }
 
+      if (req.method === "GET" && url.pathname.startsWith("/uploads/srt/")) {
+        const keyEncoded = url.pathname.replace(/^\/+/, "");
+        const keyDecoded = decodeURIComponent(url.pathname).replace(/^\/+/, "");
+
+        let obj = await env.BUCKET.get(keyEncoded);
+        if (!obj && keyDecoded !== keyEncoded) {
+          obj = await env.BUCKET.get(keyDecoded);
+        }
+        if (!obj) {
+          const source = `https://gwins.org${url.pathname}`;
+          const upstream = await fetch(source, {
+            headers: { "User-Agent": "Mozilla/5.0 (compatible; MarkdownBot/1.0)" },
+          });
+          if (!upstream.ok) return json({ ok: false, error: "subtitle not found" }, 404);
+          const body = await upstream.arrayBuffer();
+          const writeKey = keyEncoded || keyDecoded;
+          await env.BUCKET.put(writeKey, body, {
+            httpMetadata: {
+              contentType: upstream.headers.get("content-type") || "application/x-subrip; charset=utf-8",
+            },
+          });
+          obj = await env.BUCKET.get(writeKey);
+          if (!obj) return json({ ok: false, error: "subtitle not found" }, 404);
+        }
+
+        return new Response(obj.body, {
+          headers: {
+            "content-type": obj.httpMetadata?.contentType || "application/x-subrip; charset=utf-8",
+            "cache-control": "public, max-age=86400",
+          },
+        });
+      }
+
       if (req.method === "GET" && url.pathname === "/health") {
         return json({
           ok: true,
@@ -202,7 +235,7 @@ function renderHomePage(): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>GWINS Search</title>
+  <title>Miles Guo 郭文贵</title>
   <style>
     :root {
       --bg: #f5f1e8;
@@ -315,8 +348,8 @@ function renderHomePage(): string {
 <body>
   <main class="wrap">
     <header class="header">
-      <h1>GWINS 全文检索</h1>
-      <p class="desc">输入关键词实时检索索引内容，结果来自 D1 FTS / 索引库。</p>
+      <h1>Miles Guo 视频信息内容 全文检索</h1>
+      <p class="desc">输入关键词实时检索索引内容 </p>
     </header>
     <section class="search">
       <input id="q" autocomplete="off" placeholder="输入人物、事件、关键词..." />
