@@ -14,5 +14,19 @@ binding = "DB"
 database_name = "gwins-md"
 database_id = "0bf8c2cf-7ece-4533-8447-086732bbfd74"
 
+[[vectorize]]
+binding = "VEC"
+index_name = "gwins-md-chunks"
+
+[[queues.producers]]
+binding = "TRACE_QUEUE"
+queue = "gwins-trace-queue"
+
+[[queues.consumers]]
+queue = "gwins-trace-queue"
+max_batch_size = 5
+max_batch_timeout = 5
+max_retries = 2
+
 [triggers]
 crons = ["0 * * * *"]

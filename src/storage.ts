@@ -179,10 +179,12 @@ export async function replaceChunks(
 ): Promise<void> {
   await db.prepare(`DELETE FROM chunks WHERE url_hash = ?`).bind(args.urlHash).run();
   await db.prepare(`DELETE FROM chunks_fts WHERE url_hash = ?`).bind(args.urlHash).run();
+  await db.prepare(`DELETE FROM chunks_fts_v2 WHERE url_hash = ?`).bind(args.urlHash).run();
 
   for (let i = 0; i < args.chunks.length; i += 1) {
     const content = args.chunks[i];
     const contentHash = await sha256(content);
+    const chunkId = `${args.urlHash}:${i}`;
 
     await db
       .prepare(
@@ -198,6 +200,14 @@ export async function replaceChunks(
          VALUES (?, ?, ?, ?)`
       )
       .bind(args.urlHash, args.url, args.title ?? "", content)
+      .run();
+
+    await db
+      .prepare(
+        `INSERT INTO chunks_fts_v2 (content, url, url_hash, chunk_id, published_at)
+         VALUES (?, ?, ?, ?, NULL)`
+      )
+      .bind(content, args.url, args.urlHash, chunkId)
       .run();
   }
 }

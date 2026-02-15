@@ -1,5 +1,6 @@
 import { crawlRun, crawlSeed, Env } from "./crawl";
 import { getPageByUrl, searchChunks } from "./storage";
+import { enqueueTrace, getTrace, processTraceMessage, upsertHotspot } from "./trace";
 
 interface JsonObj {
   [key: string]: unknown;
@@ -19,6 +20,8 @@ export default {
             DB: !!env.DB,
             BUCKET: !!env.BUCKET,
             AI: !!env.AI,
+            VEC: !!(env as unknown as { VEC?: unknown }).VEC,
+            TRACE_QUEUE: !!(env as unknown as { TRACE_QUEUE?: unknown }).TRACE_QUEUE,
           },
         });
       }
@@ -66,6 +69,49 @@ export default {
         return json({ ok: true, q, limit, count: hits.length, hits });
       }
 
+      if (req.method === "POST" && url.pathname === "/hotspots/upsert") {
+        const body = await readJson(req);
+        if (typeof body.title !== "string" || typeof body.description !== "string") {
+          return json({ ok: false, error: "title and description are required" }, 400);
+        }
+
+        const result = await upsertHotspot(env as any, {
+          hotspot_id: asString(body.hotspot_id),
+          title: body.title,
+          description: body.description,
+          time_start: asNullableString(body.time_start),
+          time_end: asNullableString(body.time_end),
+          entities: asStringArray(body.entities),
+          keywords: asStringArray(body.keywords),
+          must_include: asStringArray(body.must_include),
+          exclude: asStringArray(body.exclude),
+        });
+        return json({ ok: true, ...result });
+      }
+
+      if (req.method === "POST" && url.pathname === "/trace") {
+        const body = await readJson(req);
+        if (typeof body.hotspot_id !== "string" || typeof body.anchor !== "string") {
+          return json({ ok: false, error: "hotspot_id and anchor are required" }, 400);
+        }
+
+        const result = await enqueueTrace(env as any, {
+          hotspot_id: body.hotspot_id,
+          anchor: body.anchor,
+          event: asNullableString(body.event),
+          aliases: asStringArray(body.aliases),
+        });
+        return json({ ok: true, ...result });
+      }
+
+      if (req.method === "GET" && url.pathname.startsWith("/trace/")) {
+        const traceId = decodeURIComponent(url.pathname.slice("/trace/".length)).trim();
+        if (!traceId) return json({ ok: false, error: "missing trace id" }, 400);
+        const trace = await getTrace(env as any, traceId);
+        if (!trace) return json({ ok: false, error: "trace not found" }, 404);
+        return json({ ok: true, trace });
+      }
+
       return json({ ok: false, error: "not found" }, 404);
     } catch (e) {
       return json(
@@ -85,6 +131,21 @@ export default {
         await crawlRun(10, env);
       })()
     );
+  },
+
+  async queue(batch: MessageBatch<unknown>, env: Env, ctx: ExecutionContext): Promise<void> {
+    for (const msg of batch.messages) {
+      ctx.waitUntil(
+        (async () => {
+          try {
+            await processTraceMessage(env as any, msg.body);
+            msg.ack();
+          } catch {
+            msg.retry();
+          }
+        })()
+      );
+    }
   },
 };
 
@@ -106,4 +167,17 @@ function json(body: JsonObj, status = 200): Response {
     status,
     headers: { "content-type": "application/json; charset=utf-8" },
   });
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function asNullableString(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((v) => String(v).trim()).filter(Boolean);
 }

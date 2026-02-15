@@ -1,6 +1,7 @@
 # gwins-md (Cloudflare Worker)
 
 抓取 `https://gwins.org/cn/milesguo/` 文章，使用 Workers AI `toMarkdown` 转换为 Markdown，写入 R2，并在 D1 建立元数据与全文检索索引（FTS5）。
+同时提供二阶段“热点线索链”能力：`hotspots` + `trace` + Queue 异步分析。
 
 ## 功能
 
@@ -25,6 +26,8 @@ npx wrangler whoami
 
 npx wrangler r2 bucket create gwins-md
 npx wrangler d1 create gwins-md
+npx wrangler vectorize create gwins-md-chunks --dimensions=768 --metric=cosine
+npx wrangler queues create gwins-trace-queue
 ```
 
 执行 `d1 create` 后，把输出中的 `database_id` 填入 `wrangler.toml` 的 `[[d1_databases]]`。
@@ -109,6 +112,39 @@ curl "http://127.0.0.1:8787/page?url=https://gwins.org/cn/milesguo/23874.html"
 
 ```bash
 curl "http://127.0.0.1:8787/search?q=%E9%83%AD%E6%96%87%E8%B4%B5&limit=20"
+```
+
+### Upsert 热点
+
+```bash
+curl -X POST "http://127.0.0.1:8787/hotspots/upsert" \
+  -H "content-type: application/json" \
+  -d '{
+    "title":"硅谷银行相关舆情",
+    "description":"关注郭文贵与硅谷银行、金融风险相关讨论",
+    "time_start":"2023-01-01",
+    "time_end":"2023-12-31",
+    "entities":["硅谷银行","瑞士信贷"],
+    "keywords":["银行","破产","金融风险"]
+  }'
+```
+
+### 创建线索链任务（异步）
+
+```bash
+curl -X POST "http://127.0.0.1:8787/trace" \
+  -H "content-type: application/json" \
+  -d '{
+    "hotspot_id":"<hotspot-id>",
+    "anchor":"郭文贵",
+    "event":"硅谷银行"
+  }'
+```
+
+### 查询线索链结果
+
+```bash
+curl "http://127.0.0.1:8787/trace/<trace-id>"
 ```
 
 ## 数据表
