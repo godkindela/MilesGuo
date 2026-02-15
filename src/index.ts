@@ -2,6 +2,9 @@ import { crawlRun, crawlSeed, Env } from "./crawl";
 import { getPageByHash, getPageByUrl, searchChunks } from "./storage";
 import { enqueueTrace, getTrace, processTraceMessage, upsertHotspot } from "./trace";
 
+const PRIMARY_HOST = "miles.2z2z.org";
+const PRIMARY_ORIGIN = `https://${PRIMARY_HOST}`;
+
 interface JsonObj {
   [key: string]: unknown;
 }
@@ -10,6 +13,9 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     try {
       const url = new URL(req.url);
+      if (shouldRedirectToPrimary(url)) {
+        return Response.redirect(`${PRIMARY_ORIGIN}${url.pathname}${url.search}`, 301);
+      }
 
       if (req.method === "GET" && url.pathname === "/") {
         return new Response(renderHomePage(), {
@@ -124,7 +130,7 @@ export default {
         const hits = await searchChunks(env.DB, q, limit);
         const normalized = hits.map((h) => ({
           ...h,
-          result_path: `/results/${h.url_hash}`,
+          result_path: `${PRIMARY_ORIGIN}/results/${h.url_hash}`,
         }));
         return json({ ok: true, q, limit, count: normalized.length, hits: normalized });
       }
@@ -220,6 +226,11 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
   const n = Number(value);
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, Math.floor(n)));
+}
+
+function shouldRedirectToPrimary(url: URL): boolean {
+  if (url.hostname === PRIMARY_HOST) return false;
+  return url.hostname.endsWith(".workers.dev");
 }
 
 function json(body: JsonObj, status = 200): Response {

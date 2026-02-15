@@ -61,7 +61,7 @@ npm run dev:scheduled
 启动后访问（触发 scheduled handler）：
 
 ```bash
-curl "http://127.0.0.1:8787/__scheduled?cron=0+*+*+*+*"
+curl "https://miles.2z2z.org/__scheduled?cron=0+*+*+*+*"
 ```
 
 ## 6) 部署
@@ -75,13 +75,13 @@ npm run deploy
 ### 健康检查
 
 ```bash
-curl "http://127.0.0.1:8787/health"
+curl "https://miles.2z2z.org/health"
 ```
 
 ### 发现链接
 
 ```bash
-curl -X POST "http://127.0.0.1:8787/crawl/seed" \
+curl -X POST "https://miles.2z2z.org/crawl/seed" \
   -H "content-type: application/json" \
   -d '{"seed":"https://gwins.org/cn/milesguo/","limit":50,"crawlPages":10}'
 ```
@@ -89,7 +89,7 @@ curl -X POST "http://127.0.0.1:8787/crawl/seed" \
 也支持直接使用 sitemap 作为 seed（推荐全量发现）：
 
 ```bash
-curl -X POST "http://127.0.0.1:8787/crawl/seed" \
+curl -X POST "https://miles.2z2z.org/crawl/seed" \
   -H "content-type: application/json" \
   -d '{"seed":"https://gwins.org/googlemap_1.xml","limit":500}'
 ```
@@ -97,7 +97,7 @@ curl -X POST "http://127.0.0.1:8787/crawl/seed" \
 ### 执行抓取与转换
 
 ```bash
-curl -X POST "http://127.0.0.1:8787/crawl/run" \
+curl -X POST "https://miles.2z2z.org/crawl/run" \
   -H "content-type: application/json" \
   -d '{"max":10}'
 ```
@@ -105,19 +105,19 @@ curl -X POST "http://127.0.0.1:8787/crawl/run" \
 ### 拉取 Markdown
 
 ```bash
-curl "http://127.0.0.1:8787/page?url=https://gwins.org/cn/milesguo/23874.html"
+curl "https://miles.2z2z.org/page?url=https://gwins.org/cn/milesguo/23874.html"
 ```
 
 ### 搜索
 
 ```bash
-curl "http://127.0.0.1:8787/search?q=%E9%83%AD%E6%96%87%E8%B4%B5&limit=20"
+curl "https://miles.2z2z.org/search?q=%E9%83%AD%E6%96%87%E8%B4%B5&limit=20"
 ```
 
 ### Upsert 热点
 
 ```bash
-curl -X POST "http://127.0.0.1:8787/hotspots/upsert" \
+curl -X POST "https://miles.2z2z.org/hotspots/upsert" \
   -H "content-type: application/json" \
   -d '{
     "title":"硅谷银行相关舆情",
@@ -132,7 +132,7 @@ curl -X POST "http://127.0.0.1:8787/hotspots/upsert" \
 ### 创建线索链任务（异步）
 
 ```bash
-curl -X POST "http://127.0.0.1:8787/trace" \
+curl -X POST "https://miles.2z2z.org/trace" \
   -H "content-type: application/json" \
   -d '{
     "hotspot_id":"<hotspot-id>",
@@ -144,7 +144,7 @@ curl -X POST "http://127.0.0.1:8787/trace" \
 ### 查询线索链结果
 
 ```bash
-curl "http://127.0.0.1:8787/trace/<trace-id>"
+curl "https://miles.2z2z.org/trace/<trace-id>"
 ```
 
 ## 数据表
