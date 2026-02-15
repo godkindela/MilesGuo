@@ -131,6 +131,17 @@ export async function getPageByUrl(
   return row ?? null;
 }
 
+export async function getPageByHash(
+  db: D1Database,
+  urlHash: string
+): Promise<{ url: string; r2_key: string | null; title: string | null; url_hash: string } | null> {
+  const row = await db
+    .prepare(`SELECT url, r2_key, title, url_hash FROM pages WHERE url_hash = ? LIMIT 1`)
+    .bind(urlHash)
+    .first<{ url: string; r2_key: string | null; title: string | null; url_hash: string }>();
+  return row ?? null;
+}
+
 export function splitMarkdownIntoChunks(markdown: string, maxChunkSize = 2000): string[] {
   const blocks = markdown
     .split(/\n\s*\n/g)
@@ -216,11 +227,12 @@ export async function searchChunks(
   db: D1Database,
   q: string,
   limit: number
-): Promise<Array<{ url: string; title: string; snippet: string }>> {
+): Promise<Array<{ url: string; url_hash: string; title: string; snippet: string }>> {
   try {
     const rs = await db
       .prepare(
         `SELECT url,
+                url_hash,
                 COALESCE(title, '') AS title,
                 snippet(chunks_fts, 3, '[', ']', ' ... ', 24) AS snippet
          FROM chunks_fts
@@ -228,13 +240,14 @@ export async function searchChunks(
          LIMIT ?`
       )
       .bind(q, limit)
-      .all<{ url: string; title: string; snippet: string }>();
+      .all<{ url: string; url_hash: string; title: string; snippet: string }>();
     return rs.results ?? [];
   } catch {
     const like = `%${q}%`;
     const rs = await db
       .prepare(
         `SELECT p.url,
+                p.url_hash,
                 COALESCE(p.title, '') AS title,
                 substr(c.content, 1, 220) AS snippet
          FROM chunks c
@@ -243,7 +256,7 @@ export async function searchChunks(
          LIMIT ?`
       )
       .bind(like, limit)
-      .all<{ url: string; title: string; snippet: string }>();
+      .all<{ url: string; url_hash: string; title: string; snippet: string }>();
     return rs.results ?? [];
   }
 }

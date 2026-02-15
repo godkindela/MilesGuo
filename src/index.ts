@@ -1,5 +1,5 @@
 import { crawlRun, crawlSeed, Env } from "./crawl";
-import { getPageByUrl, searchChunks } from "./storage";
+import { getPageByHash, getPageByUrl, searchChunks } from "./storage";
 import { enqueueTrace, getTrace, processTraceMessage, upsertHotspot } from "./trace";
 
 interface JsonObj {
@@ -13,6 +13,23 @@ export default {
 
       if (req.method === "GET" && url.pathname === "/") {
         return new Response(renderHomePage(), {
+          headers: { "content-type": "text/html; charset=utf-8" },
+        });
+      }
+
+      if (req.method === "GET" && url.pathname.startsWith("/results/")) {
+        const urlHash = decodeURIComponent(url.pathname.slice("/results/".length)).trim();
+        if (!urlHash) return json({ ok: false, error: "missing result id" }, 400);
+
+        const page = await getPageByHash(env.DB, urlHash);
+        if (!page?.r2_key) return json({ ok: false, error: "page not found" }, 404);
+
+        const obj = await env.BUCKET.get(page.r2_key);
+        if (!obj) return json({ ok: false, error: "r2 object not found" }, 404);
+        const md = await obj.text();
+        const html = markdownToHtml(md);
+
+        return new Response(renderResultPage({ title: page.title ?? page.url, sourceUrl: page.url, html }), {
           headers: { "content-type": "text/html; charset=utf-8" },
         });
       }
@@ -72,7 +89,11 @@ export default {
         if (!q) return json({ ok: false, error: "missing q parameter" }, 400);
 
         const hits = await searchChunks(env.DB, q, limit);
-        return json({ ok: true, q, limit, count: hits.length, hits });
+        const normalized = hits.map((h) => ({
+          ...h,
+          result_path: `/results/${h.url_hash}`,
+        }));
+        return json({ ok: true, q, limit, count: normalized.length, hits: normalized });
       }
 
       if (req.method === "POST" && url.pathname === "/hotspots/upsert") {
@@ -326,7 +347,8 @@ function renderHomePage(): string {
       }
       results.innerHTML = items.map((it) => \`
         <article class="item">
-          <a class="url" href="\${it.url}" target="_blank" rel="noreferrer">\${escapeHtml(it.url || "")}</a>
+          <a class="url" href="\${it.result_path || '#'}">\${escapeHtml(it.result_path || "")}</a>
+          <p class="snippet">来源：\${escapeHtml(it.url || "")}</p>
           <h2 class="title">\${escapeHtml(it.title || "Untitled")}</h2>
           <p class="snippet">\${escapeHtml((it.snippet || "").replaceAll("[", "").replaceAll("]", ""))}</p>
         </article>
@@ -378,4 +400,137 @@ function asNullableString(value: unknown): string | null {
 function asStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((v) => String(v).trim()).filter(Boolean);
+}
+
+function renderResultPage(args: { title: string; sourceUrl: string; html: string }): string {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${escapeHtml(args.title)}</title>
+  <style>
+    body { margin:0; font-family:"Noto Serif SC","PingFang SC",serif; background:#f7f7f7; color:#222; }
+    .wrap { max-width: 900px; margin: 24px auto; background:#fff; border:1px solid #e4e4e4; border-radius:14px; overflow:hidden; }
+    .head { padding:18px 22px; border-bottom:1px solid #ececec; background:#fafafa; }
+    .head a { color:#0d7a5f; text-decoration:none; font-size:14px; }
+    .head h1 { margin:10px 0 0; font-size:24px; line-height:1.35; }
+    .source { color:#666; font-size:13px; margin-top:8px; word-break:break-all; }
+    .article { padding:24px 22px; line-height:1.75; font-size:17px; }
+    .article h1,.article h2,.article h3 { line-height:1.4; margin-top:1.2em; }
+    .article pre { background:#f4f4f4; padding:10px; border-radius:8px; overflow:auto; }
+    .article code { background:#f1f1f1; padding:2px 4px; border-radius:4px; }
+    .article blockquote { margin:0; padding:0 0 0 14px; border-left:3px solid #d8d8d8; color:#555; }
+    .article a { color:#0d7a5f; }
+    .article ul,.article ol { padding-left: 1.2em; }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header class="head">
+      <a href="/">← 返回搜索</a>
+      <h1>${escapeHtml(args.title)}</h1>
+      <div class="source">原文 URL: ${escapeHtml(args.sourceUrl)}</div>
+    </header>
+    <article class="article">${args.html}</article>
+  </main>
+</body>
+</html>`;
+}
+
+function markdownToHtml(md: string): string {
+  const lines = md.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  let inList = false;
+  let inCode = false;
+
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+
+    if (line.startsWith("```")) {
+      if (!inCode) {
+        inCode = true;
+        if (inList) {
+          out.push("</ul>");
+          inList = false;
+        }
+        out.push("<pre><code>");
+      } else {
+        inCode = false;
+        out.push("</code></pre>");
+      }
+      continue;
+    }
+
+    if (inCode) {
+      out.push(escapeHtml(line) + "\n");
+      continue;
+    }
+
+    if (!line.trim()) {
+      if (inList) {
+        out.push("</ul>");
+        inList = false;
+      }
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.*)$/);
+    if (heading) {
+      if (inList) {
+        out.push("</ul>");
+        inList = false;
+      }
+      const level = heading[1].length;
+      out.push(`<h${level}>${inlineMd(heading[2])}</h${level}>`);
+      continue;
+    }
+
+    if (line.startsWith(">")) {
+      if (inList) {
+        out.push("</ul>");
+        inList = false;
+      }
+      out.push(`<blockquote>${inlineMd(line.replace(/^>\s?/, ""))}</blockquote>`);
+      continue;
+    }
+
+    const li = line.match(/^[-*]\s+(.*)$/);
+    if (li) {
+      if (!inList) {
+        out.push("<ul>");
+        inList = true;
+      }
+      out.push(`<li>${inlineMd(li[1])}</li>`);
+      continue;
+    }
+
+    if (inList) {
+      out.push("</ul>");
+      inList = false;
+    }
+    out.push(`<p>${inlineMd(line)}</p>`);
+  }
+
+  if (inList) out.push("</ul>");
+  if (inCode) out.push("</code></pre>");
+  return out.join("\n");
+}
+
+function inlineMd(text: string): string {
+  let s = escapeHtml(text);
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, href) => `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${label}</a>`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  s = s.replace(/\*([^*]+)\*/g, "<em>$1</em>");
+  s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+  return s;
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
