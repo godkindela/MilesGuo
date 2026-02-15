@@ -3,6 +3,9 @@
 抓取 `https://gwins.org/cn/milesguo/` 文章，使用 Workers AI `toMarkdown` 转换为 Markdown，写入 R2，并在 D1 建立元数据与全文检索索引（FTS5）。
 同时提供二阶段“热点线索链”能力：`hotspots` + `trace` + Queue 异步分析。
 
+主访问域名：`https://miles.2z2z.org`  
+`*.workers.dev` 请求会被 301 重定向到主域名。
+
 ## 功能
 
 - `POST /crawl/seed`：从栏目页发现文章链接并入库去重。
@@ -10,6 +13,8 @@
 - `GET /page?url=...`：按 URL 返回对应 Markdown。
 - `GET /search?q=...&limit=20`：基于 FTS 搜索。
 - `GET /health`：健康检查与绑定状态。
+- `GET /robots.txt`：搜索引擎抓取策略。
+- `GET /sitemap.xml`：结果页 sitemap。
 - `scheduled()`：每小时自动执行一轮 seed + run。
 
 ## 1) 安装依赖
@@ -146,6 +151,15 @@ curl -X POST "https://miles.2z2z.org/trace" \
 ```bash
 curl "https://miles.2z2z.org/trace/<trace-id>"
 ```
+
+## Bot 策略
+
+- 搜索引擎（Google/Bing 等）：
+  - 首页与结果页返回 SEO 元标签、canonical、结构化数据。
+  - 可抓取 `robots.txt` 与 `sitemap.xml`。
+- AI Bot（GPTBot/ChatGPT-User/ClaudeBot/PerplexityBot 等）：
+  - 访问 `/results/:id` 时返回 `text/markdown`。
+  - 访问 `/` 时返回 Markdown 索引摘要，便于机器读取。
 
 ## 数据表
 

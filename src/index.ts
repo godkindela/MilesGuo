@@ -1,5 +1,5 @@
 import { crawlRun, crawlSeed, Env } from "./crawl";
-import { getPageByHash, getPageByUrl, searchChunks } from "./storage";
+import { getPageByHash, getPageByUrl, getRecentStoredPages, getSitemapPages, searchChunks } from "./storage";
 import { enqueueTrace, getTrace, processTraceMessage, upsertHotspot } from "./trace";
 
 const PRIMARY_HOST = "miles.2z2z.org";
@@ -16,10 +16,38 @@ export default {
       if (shouldRedirectToPrimary(url)) {
         return Response.redirect(`${PRIMARY_ORIGIN}${url.pathname}${url.search}`, 301);
       }
+      const ua = req.headers.get("user-agent") ?? "";
+      const agent = classifyAgent(ua);
+
+      if (req.method === "GET" && url.pathname === "/robots.txt") {
+        return new Response(renderRobotsTxt(), {
+          headers: { "content-type": "text/plain; charset=utf-8" },
+        });
+      }
+
+      if (req.method === "GET" && url.pathname === "/sitemap.xml") {
+        const entries = await getSitemapPages(env.DB, 5000);
+        return new Response(renderSitemapXml(entries), {
+          headers: { "content-type": "application/xml; charset=utf-8" },
+        });
+      }
 
       if (req.method === "GET" && url.pathname === "/") {
+        if (agent.isAiBot) {
+          const recent = await getRecentStoredPages(env.DB, 30);
+          return new Response(renderHomeMarkdownForAi(recent), {
+            headers: {
+              "content-type": "text/markdown; charset=utf-8",
+              "x-ai-format": "markdown",
+            },
+          });
+        }
+
         return new Response(renderHomePage(), {
-          headers: { "content-type": "text/html; charset=utf-8" },
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "x-robots-tag": "index,follow,max-snippet:-1,max-image-preview:large,max-video-preview:-1",
+          },
         });
       }
 
@@ -33,11 +61,32 @@ export default {
         const obj = await env.BUCKET.get(page.r2_key);
         if (!obj) return json({ ok: false, error: "r2 object not found" }, 404);
         const md = await obj.text();
+
+        if (agent.isAiBot) {
+          return new Response(md, {
+            headers: {
+              "content-type": "text/markdown; charset=utf-8",
+              "x-ai-format": "markdown",
+            },
+          });
+        }
+
         const html = markdownToHtml(md);
 
-        return new Response(renderResultPage({ title: page.title ?? page.url, sourceUrl: page.url, html }), {
-          headers: { "content-type": "text/html; charset=utf-8" },
-        });
+        return new Response(
+          renderResultPage({
+            title: page.title ?? page.url,
+            sourceUrl: page.url,
+            canonicalUrl: `${PRIMARY_ORIGIN}/results/${urlHash}`,
+            html,
+          }),
+          {
+            headers: {
+              "content-type": "text/html; charset=utf-8",
+              "x-robots-tag": "index,follow,max-snippet:-1,max-image-preview:large,max-video-preview:-1",
+            },
+          }
+        );
       }
 
       if (req.method === "GET" && url.pathname.startsWith("/uploads/srt/")) {
@@ -246,6 +295,13 @@ function renderHomePage(): string {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Miles Guo 郭文贵内容检索与证据阅读，支持全文搜索、线索追踪与结果页索引。" />
+  <meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large,max-video-preview:-1" />
+  <link rel="canonical" href="${PRIMARY_ORIGIN}/" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Miles Guo 郭文贵" />
+  <meta property="og:description" content="输入关键词检索已入库内容，浏览结构化结果页。" />
+  <meta property="og:url" content="${PRIMARY_ORIGIN}/" />
   <title>Miles Guo 郭文贵</title>
   <style>
     :root {
@@ -370,6 +426,19 @@ function renderHomePage(): string {
       <div class="empty">开始输入即可查看相关内容</div>
     </section>
   </main>
+  <script type="application/ld+json">
+  {
+    "@context":"https://schema.org",
+    "@type":"WebSite",
+    "name":"Miles Guo 郭文贵",
+    "url":"${PRIMARY_ORIGIN}/",
+    "potentialAction":{
+      "@type":"SearchAction",
+      "target":"${PRIMARY_ORIGIN}/search?q={search_term_string}",
+      "query-input":"required name=search_term_string"
+    }
+  }
+  </script>
   <script>
     const input = document.getElementById("q");
     const meta = document.getElementById("meta");
@@ -446,12 +515,18 @@ function asStringArray(value: unknown): string[] {
   return value.map((v) => String(v).trim()).filter(Boolean);
 }
 
-function renderResultPage(args: { title: string; sourceUrl: string; html: string }): string {
+function renderResultPage(args: { title: string; sourceUrl: string; canonicalUrl: string; html: string }): string {
   return `<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="${escapeHtml(args.title)}" />
+  <meta name="robots" content="index,follow,max-snippet:-1,max-image-preview:large,max-video-preview:-1" />
+  <link rel="canonical" href="${args.canonicalUrl}" />
+  <meta property="og:type" content="article" />
+  <meta property="og:title" content="${escapeHtml(args.title)}" />
+  <meta property="og:url" content="${args.canonicalUrl}" />
   <title>${escapeHtml(args.title)}</title>
   <style>
     body { margin:0; font-family:"Noto Serif SC","PingFang SC",serif; background:#f7f7f7; color:#222; }
@@ -480,6 +555,43 @@ function renderResultPage(args: { title: string; sourceUrl: string; html: string
   </main>
 </body>
 </html>`;
+}
+
+function renderHomeMarkdownForAi(
+  pages: Array<{ url_hash: string; title: string | null; updated_at: string | null }>
+): string {
+  const lines = [
+    "# Miles Guo Content Index",
+    "",
+    `- site: ${PRIMARY_ORIGIN}`,
+    "- format: markdown",
+    "- usage: call `/search?q=关键词&limit=20` for retrieval",
+    "",
+    "## Recent Results",
+    "",
+  ];
+
+  for (const p of pages) {
+    lines.push(
+      `- [${(p.title ?? p.url_hash).replaceAll("\\n", " ")}](${PRIMARY_ORIGIN}/results/${p.url_hash}) (${p.updated_at ?? "unknown"})`
+    );
+  }
+
+  return lines.join("\\n");
+}
+
+function renderRobotsTxt(): string {
+  return `User-agent: *\nAllow: /\nDisallow: /trace\nDisallow: /hotspots\nDisallow: /crawl\n\nSitemap: ${PRIMARY_ORIGIN}/sitemap.xml\nHost: ${PRIMARY_HOST}\n`;
+}
+
+function renderSitemapXml(entries: Array<{ url_hash: string; updated_at: string | null }>): string {
+  const urls = entries
+    .map((e) => {
+      const lastmod = e.updated_at ? `<lastmod>${new Date(e.updated_at).toISOString()}</lastmod>` : "";
+      return `<url><loc>${PRIMARY_ORIGIN}/results/${e.url_hash}</loc>${lastmod}</url>`;
+    })
+    .join("");
+  return `<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>${PRIMARY_ORIGIN}/</loc></url>${urls}</urlset>`;
 }
 
 function markdownToHtml(md: string): string {
@@ -577,4 +689,34 @@ function escapeHtml(text: string): string {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function classifyAgent(userAgent: string): { isAiBot: boolean; isSearchBot: boolean } {
+  const ua = userAgent.toLowerCase();
+  const aiBots = [
+    "gptbot",
+    "chatgpt-user",
+    "oai-searchbot",
+    "claudebot",
+    "anthropic-ai",
+    "perplexitybot",
+    "youbot",
+    "cohere-ai",
+    "ccbot",
+    "bytespider",
+  ];
+  const searchBots = [
+    "googlebot",
+    "bingbot",
+    "duckduckbot",
+    "yandexbot",
+    "baiduspider",
+    "applebot",
+    "slurp",
+  ];
+
+  return {
+    isAiBot: aiBots.some((s) => ua.includes(s)),
+    isSearchBot: searchBots.some((s) => ua.includes(s)),
+  };
 }

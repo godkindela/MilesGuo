@@ -142,6 +142,40 @@ export async function getPageByHash(
   return row ?? null;
 }
 
+export async function getSitemapPages(
+  db: D1Database,
+  limit: number
+): Promise<Array<{ url_hash: string; updated_at: string | null }>> {
+  const rs = await db
+    .prepare(
+      `SELECT url_hash, updated_at
+       FROM pages
+       WHERE status = 'stored' AND r2_key IS NOT NULL
+       ORDER BY datetime(updated_at) DESC
+       LIMIT ?`
+    )
+    .bind(limit)
+    .all<{ url_hash: string; updated_at: string | null }>();
+  return rs.results ?? [];
+}
+
+export async function getRecentStoredPages(
+  db: D1Database,
+  limit: number
+): Promise<Array<{ url_hash: string; title: string | null; updated_at: string | null }>> {
+  const rs = await db
+    .prepare(
+      `SELECT url_hash, title, updated_at
+       FROM pages
+       WHERE status = 'stored'
+       ORDER BY datetime(updated_at) DESC
+       LIMIT ?`
+    )
+    .bind(limit)
+    .all<{ url_hash: string; title: string | null; updated_at: string | null }>();
+  return rs.results ?? [];
+}
+
 export function splitMarkdownIntoChunks(markdown: string, maxChunkSize = 2000): string[] {
   const blocks = markdown
     .split(/\n\s*\n/g)
