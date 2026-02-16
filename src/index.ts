@@ -312,6 +312,7 @@ function renderHomePage(): string {
   <meta property="og:title" content="Miles Guo 郭文贵" />
   <meta property="og:description" content="输入关键词检索已入库内容，浏览结构化结果页。" />
   <meta property="og:url" content="${PRIMARY_ORIGIN}/" />
+  <script defer src="https://umami.2z2z.org/script.js" data-website-id="fb4caa8b-bbfa-4da2-91c2-f23abf106e8d"></script>
   <title>Miles Guo 郭文贵</title>
   <style>
     :root {
@@ -595,6 +596,7 @@ function renderResultPage(args: { title: string; sourceUrl: string; canonicalUrl
   <meta property="og:type" content="article" />
   <meta property="og:title" content="${escapeHtml(args.title)}" />
   <meta property="og:url" content="${args.canonicalUrl}" />
+  <script defer src="https://umami.2z2z.org/script.js" data-website-id="fb4caa8b-bbfa-4da2-91c2-f23abf106e8d"></script>
   <title>${escapeHtml(args.title)}</title>
   <style>
     body { margin:0; font-family:"Noto Serif SC","PingFang SC",serif; background:#f7f7f7; color:#222; }
